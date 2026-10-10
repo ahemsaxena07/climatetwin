@@ -1,4 +1,5 @@
 import { Fragment } from 'react'
+import { LoaderCircle, Sparkles } from 'lucide-react'
 import type { Opening, TabId, HeatLevel } from '../../types/dashboard'
 import {
   BUILDING, PLAN_VIEWBOX, acUnits, airPaths, airPoints, ceilingFans, exhaustFans, openings, project, proposals, rooms,
@@ -87,18 +88,71 @@ function Furniture() {
   </g>
 }
 
-interface Props { tab: TabId; highlight: string | null; imageUrl?: string | null }
+interface Props {
+  tab: TabId
+  highlight: string | null
+  imageUrl?: string | null
+  layerImageUrl?: string | null
+  layerSummary?: string
+  layerGenerating?: boolean
+  layerError?: string
+  onGenerate?: () => void
+}
 
-export function FloorPlanCanvas({ tab, highlight, imageUrl }: Props) {
+export function FloorPlanCanvas({
+  tab, highlight, imageUrl, layerImageUrl, layerSummary, layerGenerating, layerError, onGenerate,
+}: Props) {
+  const layerLabel: Partial<Record<TabId, string>> = {
+    thermal: 'Thermal Map',
+    ventilation: 'Ventilation Map',
+    cooling: 'Cooling Layout',
+    proposed: 'Proposed Plan',
+  }
+  const currentLayerLabel = layerLabel[tab] || 'floor-plan'
   const hl = highlight && highlight !== 'all' ? rooms.find((r) => r.id === highlight) : null
   const tag = (x: number, y: number, t: string, c: string, w = 150) => (
     <g><rect x={x} y={y} width={w} height={17} rx={8} fill="#fff" stroke={c} /><text x={x + w / 2} y={y + 12} fontSize={10} fontWeight={600} textAnchor="middle" fill={c}>{t}</text></g>)
 
   if (imageUrl) {
+    if (tab !== 'original') {
+      if (layerImageUrl) {
+        return (
+          <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-2 overflow-auto p-3">
+            <img src={layerImageUrl} alt={`AI-generated ${currentLayerLabel} floor plan visualization`} className="max-h-[520px] max-w-full object-contain" />
+            <p className="text-center text-xs text-muted">{layerSummary} AI-generated qualitative concept; verify room details and interventions on site.</p>
+          </div>
+        )
+      }
+      return (
+        <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-3 overflow-auto p-4 text-center">
+          <img src={imageUrl} alt="Uploaded floor plan used as the map-generation reference" className="max-h-40 max-w-full object-contain opacity-60" />
+          {layerGenerating ? (
+            <div className="flex items-center gap-2 text-sm font-medium text-ink">
+              <LoaderCircle size={17} className="animate-spin text-leaf" />
+              Gemini is turning the room findings into a {currentLayerLabel} visual specification and generating the map…
+            </div>
+          ) : layerError ? (
+            <>
+              <p role="alert" className="max-w-xl text-sm text-red-700">{layerError}</p>
+              <button type="button" onClick={onGenerate} className="inline-flex items-center gap-2 rounded-lg bg-pine px-3 py-2 text-sm font-semibold text-white hover:bg-forest">
+                <Sparkles size={15} /> Retry map generation
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-muted">Generate this map from the uploaded plan and its room-by-room analysis.</p>
+              <button type="button" onClick={onGenerate} className="inline-flex items-center gap-2 rounded-lg bg-pine px-3 py-2 text-sm font-semibold text-white hover:bg-forest">
+                <Sparkles size={15} /> Generate {currentLayerLabel}
+              </button>
+            </>
+          )}
+        </div>
+      )
+    }
     return (
       <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-2 overflow-auto p-3">
-        <img src={imageUrl} alt="Uploaded floor plan analyzed by Amazon Bedrock" className="max-h-[480px] max-w-full object-contain" />
-        <p className="text-xs text-muted">Uploaded floor plan · {tab === 'original' ? 'original image' : `AI room data shown below · ${tab} view`}</p>
+        <img src={imageUrl} alt="Uploaded floor plan analyzed by Google Gemini" className="max-h-[480px] max-w-full object-contain" />
+        <p className="text-xs text-muted">Uploaded floor plan · original image</p>
       </div>
     )
   }

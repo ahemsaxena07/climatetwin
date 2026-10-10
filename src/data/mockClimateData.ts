@@ -285,12 +285,12 @@ export const workflowSteps = [
 export const sectionInfo: Partial<Record<SectionId, { title: string; description: string; stats: { label: string; value: string }[] }>> = {
   upload: {
     title: 'Upload Floor Plan',
-    description: 'Upload a floor plan image for Bedrock analysis, then explore room findings, live local climate, and generated design concepts.',
+    description: 'Upload a floor plan image for Gemini analysis, then explore room findings, live local climate, and generated design concepts.',
     stats: [],
   },
   materials: {
     title: 'Materials & Products',
-    description: 'Review Bedrock-generated material and shading recommendations. Verify all products and specifications with a qualified professional.',
+    description: 'Review AI-generated material and shading recommendations. Verify all products and specifications with a qualified professional.',
     stats: [{ label: 'Roof finish', value: 'Review AI recommendations' }, { label: 'Glazing', value: 'Verify against site conditions' }, { label: 'Wall', value: 'Confirm existing construction' }],
   },
   cost: {
@@ -310,7 +310,7 @@ export const sectionInfo: Partial<Record<SectionId, { title: string; description
   },
   settings: {
     title: 'Settings',
-    description: 'Configure the demo environment. Floor plan analysis and design concepts use Amazon Bedrock; weather uses Open-Meteo.',
-    stats: [{ label: 'Units', value: 'Metric (°C, km/h)' }, { label: 'Weather source', value: 'Open-Meteo public API' }, { label: 'AI analysis', value: 'Amazon Bedrock' }],
+    description: 'Configure the demo environment. Floor plan analysis uses Google Gemini, design concepts use Amazon Bedrock, and weather uses Open-Meteo.',
+    stats: [{ label: 'Units', value: 'Metric (°C, km/h)' }, { label: 'Weather source', value: 'Open-Meteo public API' }, { label: 'AI analysis', value: 'Google Gemini' }],
   },
 }

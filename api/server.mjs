@@ -1,10 +1,11 @@
 import { createServer } from 'node:http'
-import { analyzeFloorPlan, generateDesignImage, publicError } from './bedrock.mjs'
+import { generateDesignImage, publicError } from './bedrock.mjs'
+import { analyzeFloorPlanWithGemini, generateFloorPlanLayer } from './gemini.mjs'
 
 const PORT = Number(process.env.API_PORT || 3001)
 const MAX_REQUEST_BYTES = 5 * 1024 * 1024
-const MAX_BEDROCK_REQUESTS_PER_MINUTE = 12
-const bedrockRequests = new Map()
+const MAX_AI_REQUESTS_PER_MINUTE = 12
+const aiRequests = new Map()
 
 function sendJson(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -138,13 +139,19 @@ async function handle(request, response) {
   const url = new URL(request.url || '/', 'http://localhost')
   try {
     if (request.method === 'POST' && url.pathname === '/api/analyze-floorplan') {
-      enforceBedrockRateLimit(request)
+      enforceAiRateLimit(request)
       const body = await readJson(request)
-      sendJson(response, 200, await analyzeFloorPlan(body.imageBase64, body.mimeType))
+      sendJson(response, 200, await analyzeFloorPlanWithGemini(body.imageBase64, body.mimeType))
+      return
+    }
+    if (request.method === 'POST' && url.pathname === '/api/generate-floorplan-layer') {
+      enforceAiRateLimit(request)
+      const body = await readJson(request)
+      sendJson(response, 200, await generateFloorPlanLayer(body))
       return
     }
     if (request.method === 'POST' && url.pathname === '/api/generate-design-image') {
-      enforceBedrockRateLimit(request)
+      enforceAiRateLimit(request)
       const body = await readJson(request)
       const imageBase64 = await generateDesignImage(body.prompt, body.imageBase64, body.mimeType)
       sendJson(response, 200, { imageBase64 })
@@ -162,18 +169,18 @@ async function handle(request, response) {
   }
 }
 
-function enforceBedrockRateLimit(request) {
+function enforceAiRateLimit(request) {
   const now = Date.now()
   const key = request.socket.remoteAddress || 'unknown'
-  const recent = (bedrockRequests.get(key) || []).filter((timestamp) => now - timestamp < 60_000)
-  if (recent.length >= MAX_BEDROCK_REQUESTS_PER_MINUTE) {
+  const recent = (aiRequests.get(key) || []).filter((timestamp) => now - timestamp < 60_000)
+  if (recent.length >= MAX_AI_REQUESTS_PER_MINUTE) {
     throw Object.assign(new Error('Too many AI requests. Please wait a minute and try again.'), { status: 429 })
   }
   recent.push(now)
-  bedrockRequests.set(key, recent)
-  if (bedrockRequests.size > 1000) {
-    for (const [address, timestamps] of bedrockRequests) {
-      if (!timestamps.some((timestamp) => now - timestamp < 60_000)) bedrockRequests.delete(address)
+  aiRequests.set(key, recent)
+  if (aiRequests.size > 1000) {
+    for (const [address, timestamps] of aiRequests) {
+      if (!timestamps.some((timestamp) => now - timestamp < 60_000)) aiRequests.delete(address)
     }
   }
 }

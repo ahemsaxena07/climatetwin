@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, LoaderCircle, RotateCcw, Sparkles } from 'lucide-react'
 import type { FloorPlanAnalysis, LiveClimate, Observation, Recommendation, SavedState, SectionId, TabId } from './types/dashboard'
 import {
@@ -22,6 +22,7 @@ import { FloorPlanUploader } from './components/upload/FloorPlanUploader'
 
 const KEY = 'climatetwin.project'
 const sectionTab: Partial<Record<SectionId, TabId>> = { thermal: 'thermal', ventilation: 'ventilation', cooling: 'cooling' }
+type GeneratedLayer = Exclude<TabId, 'original'>
 
 function loadSaved(): SavedState | null {
   try { const s = localStorage.getItem(KEY); return s ? (JSON.parse(s) as SavedState) : null } catch { return null }
@@ -44,6 +45,11 @@ export default function App() {
   const [saved, setSaved] = useState<SavedState | null>(init)
   const [floorPlanAnalysis, setFloorPlanAnalysis] = useState<FloorPlanAnalysis | null>(null)
   const [floorPlanImage, setFloorPlanImage] = useState<string | null>(null)
+  const [layerImages, setLayerImages] = useState<Partial<Record<GeneratedLayer, { src: string; summary: string }>>>({})
+  const [generatingLayers, setGeneratingLayers] = useState<Set<GeneratedLayer>>(() => new Set())
+  const [layerErrors, setLayerErrors] = useState<Partial<Record<GeneratedLayer, string>>>({})
+  const planGenerationId = useRef(0)
+  const activeLayerRequests = useRef(new Set<string>())
   const [climateResult, setClimateResult] = useState<{ key: string; data: LiveClimate } | null>(null)
   const [climateRequestError, setClimateRequestError] = useState<{ key: string; error: string } | null>(null)
   const [designImage, setDesignImage] = useState<string | null>(null)
@@ -62,7 +68,7 @@ export default function App() {
   const metrics = floorPlanAnalysis ? liveClimate?.metrics ?? [] : profile.metrics
   const currentObservations = floorPlanAnalysis?.observations ?? observations
   const currentRecommendations = floorPlanAnalysis?.recommendations ?? recommendations
-  const analysisSource = floorPlanAnalysis ? 'Amazon Bedrock' : 'Sample data'
+  const analysisSource = floorPlanAnalysis ? 'Google Gemini' : 'Sample data'
 
   useEffect(() => {
     if (!floorPlanAnalysis) return
@@ -85,7 +91,7 @@ export default function App() {
 
   const select = (id: SectionId) => {
     setSection(id); setMenu(false)
-    const t = sectionTab[id]; if (t) setTab(t)
+    const t = sectionTab[id]; if (t) changeTab(t)
     if (id === 'overview') { setHighlight(null); setObsId(null); setRecId(null) }
   }
   const reset = () => { setSection('overview'); setTab('original'); setHighlight(null); setObsId(null); setRecId(null); setPanel(null); notify('View reset to Overview') }
@@ -99,7 +105,7 @@ export default function App() {
     const lines = [
       'ClimateTwin AI - Floor Plan and Climate Report', '',
       `Project: ${project.name}`, `Location: ${loc.name}`, `Historical period: ${per.label}`,
-      floorPlanAnalysis ? `Analysis source: Amazon Bedrock` : 'Analysis source: built-in illustrative sample',
+      floorPlanAnalysis ? `Analysis source: Google Gemini` : 'Analysis source: built-in illustrative sample',
       liveClimate ? `Climate source: ${liveClimate.source}` : 'Climate source: built-in illustrative sample', '',
       ...(floorPlanAnalysis ? [
         'Floor plan summary:', floorPlanAnalysis.summary, `Orientation: ${floorPlanAnalysis.orientation}`,
@@ -118,10 +124,14 @@ export default function App() {
   }
 
   const pickObs = (o: Observation) => { setObsId(o.id); setRecId(null); setHighlight(o.roomId) }
-  const pickRec = (r: Recommendation) => { setRecId(r.id); setObsId(null); setHighlight(r.roomId); setTab('proposed'); setPanel({ t: 'rec', r }) }
+  const pickRec = (r: Recommendation) => { setRecId(r.id); setObsId(null); setHighlight(r.roomId); changeTab('proposed'); setPanel({ t: 'rec', r }) }
   const handleAnalyzed = (result: FloorPlanAnalysis, imageUrl: string) => {
+    planGenerationId.current += 1
     setFloorPlanAnalysis(result)
     setFloorPlanImage(imageUrl)
+    setLayerImages({})
+    setGeneratingLayers(new Set())
+    setLayerErrors({})
     setDesignImage(null)
     setDesignImageError(null)
     setObsId(null)
@@ -130,6 +140,66 @@ export default function App() {
     setTab('original')
     setHighlight(null)
     notify('Floor plan analyzed — loading live climate data')
+  }
+  const generateLayer = async (layer: GeneratedLayer, retry = false) => {
+    if (!floorPlanAnalysis || !floorPlanImage || (!retry && layerImages[layer])) return
+    const generationId = planGenerationId.current
+    const requestId = `${generationId}:${layer}`
+    if (activeLayerRequests.current.has(requestId)) return
+    activeLayerRequests.current.add(requestId)
+    setGeneratingLayers((current) => new Set(current).add(layer))
+    setLayerErrors((current) => ({ ...current, [layer]: undefined }))
+    try {
+      const comma = floorPlanImage.indexOf(',')
+      const mimeType = floorPlanImage.slice(0, comma).match(/^data:(image\/[^;]+);base64$/)?.[1]
+      if (comma < 0 || !mimeType) throw new Error('The uploaded floor plan image could not be prepared for map generation.')
+      const response = await fetch('/api/generate-floorplan-layer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          layer,
+          imageBase64: floorPlanImage.slice(comma + 1),
+          mimeType,
+          analysis: floorPlanAnalysis,
+          climate: liveClimate ? { metrics: liveClimate.metrics } : undefined,
+        }),
+      })
+      const body = await response.text()
+      let result: { imageBase64?: string; mimeType?: string; summary?: string; error?: string }
+      try {
+        result = JSON.parse(body) as typeof result
+      } catch {
+        throw new Error(`The map generation service returned an invalid response (HTTP ${response.status}).`)
+      }
+      if (!response.ok) throw new Error(result.error || 'Gemini could not generate this floor-plan map.')
+      if (!result.imageBase64) throw new Error('Gemini returned no image for this floor-plan map.')
+      if (planGenerationId.current === generationId) {
+        setLayerImages((current) => ({
+          ...current,
+          [layer]: {
+            src: `data:${result.mimeType || 'image/png'};base64,${result.imageBase64}`,
+            summary: result.summary || 'Generated from your uploaded floor plan and room analysis.',
+          },
+        }))
+      }
+    } catch (cause) {
+      if (planGenerationId.current === generationId) {
+        setLayerErrors((current) => ({ ...current, [layer]: cause instanceof Error ? cause.message : 'Could not generate this floor-plan map.' }))
+      }
+    } finally {
+      activeLayerRequests.current.delete(requestId)
+      if (planGenerationId.current === generationId) {
+        setGeneratingLayers((current) => {
+          const next = new Set(current)
+          next.delete(layer)
+          return next
+        })
+      }
+    }
+  }
+  const changeTab = (nextTab: TabId) => {
+    setTab(nextTab)
+    if (nextTab !== 'original') void generateLayer(nextTab)
   }
   const createConditioningImage = (source: string) => new Promise<string>((resolve, reject) => {
     const image = new Image()
@@ -203,12 +273,23 @@ export default function App() {
                   <h2 id="fp-h" className="font-serif text-[19px] font-semibold">Floor Plan Analysis</h2>
                   <button onClick={reset} className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-muted hover:bg-ivory hover:text-ink"><RotateCcw size={13} /> Reset view</button>
                 </div>
-                <AnalysisTabs tab={tab} onChange={setTab} />
-                <div className="min-h-[340px] flex-1 rounded-lg border border-line bg-white"><FloorPlanCanvas tab={tab} highlight={highlight} imageUrl={floorPlanImage} /></div>
+                <AnalysisTabs tab={tab} onChange={changeTab} />
+                <div className="min-h-[340px] flex-1 rounded-lg border border-line bg-white">
+                  <FloorPlanCanvas
+                    tab={tab}
+                    highlight={highlight}
+                    imageUrl={floorPlanImage}
+                    layerImageUrl={tab === 'original' ? null : layerImages[tab]?.src}
+                    layerSummary={tab === 'original' ? undefined : layerImages[tab]?.summary}
+                    layerGenerating={tab === 'original' ? false : generatingLayers.has(tab)}
+                    layerError={tab === 'original' ? undefined : layerErrors[tab]}
+                    onGenerate={tab === 'original' ? undefined : () => { void generateLayer(tab, true) }}
+                  />
+                </div>
                 {floorPlanAnalysis && (
                   <div className="rounded-lg border border-line bg-ivory p-3">
                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="text-sm font-semibold">Bedrock plan analysis <Badge tone="green">{floorPlanAnalysis.rooms.length} rooms</Badge></h3>
+                      <h3 className="text-sm font-semibold">Gemini plan analysis <Badge tone="green">{floorPlanAnalysis.rooms.length} rooms</Badge></h3>
                       <span className="text-xs text-muted">{floorPlanAnalysis.openings.doors} doors · {floorPlanAnalysis.openings.windows} windows · {floorPlanAnalysis.openings.vents} vents</span>
                     </div>
                     <p className="mb-2 text-xs leading-relaxed text-muted">{floorPlanAnalysis.summary}</p>
@@ -266,7 +347,7 @@ export default function App() {
           {info && (
             <section className="card p-5" aria-labelledby="ph">
               <div className="mb-1 flex items-center justify-between">
-                <h2 id="ph" className="font-serif text-[22px] font-semibold">{info.title} <Badge tone="neutral">{section === 'upload' ? 'Amazon Bedrock' : 'Demo'}</Badge></h2>
+                <h2 id="ph" className="font-serif text-[22px] font-semibold">{info.title} <Badge tone="neutral">{section === 'upload' ? 'Google Gemini' : 'Demo'}</Badge></h2>
                 <button onClick={() => select('overview')} className="flex items-center gap-1 text-sm font-semibold text-leaf hover:underline"><ArrowLeft size={14} /> Back to Overview</button>
               </div>
               <p className="mb-4 max-w-2xl text-sm text-muted">{info.description}</p>
@@ -294,7 +375,7 @@ export default function App() {
 
       {panel?.t === 'obs' && (
         <Modal title="Observation details" onClose={close}>
-          <Badge tone={floorPlanAnalysis ? 'green' : 'neutral'}>{floorPlanAnalysis ? 'Amazon Bedrock floor plan analysis' : 'Illustrative sample observation'}</Badge>
+          <Badge tone={floorPlanAnalysis ? 'green' : 'neutral'}>{floorPlanAnalysis ? 'Google Gemini floor plan analysis' : 'Illustrative sample observation'}</Badge>
           <div className="mt-3 flex flex-col gap-3 text-sm">
             <div className="flex items-start justify-between gap-2"><h3 className="font-semibold">{panel.o.finding}</h3><Badge tone={severityTone(panel.o.severity)}>{panel.o.severity}</Badge></div>
             <p><b>Reasoning:</b> {panel.o.reasoning}</p><p><b>Assumptions:</b> {panel.o.assumptions}</p><p><b>Recommended next step:</b> {panel.o.nextStep}</p>

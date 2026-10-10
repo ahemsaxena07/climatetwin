@@ -3,7 +3,6 @@ import { FileImage, LoaderCircle, Sparkles, Upload, X } from 'lucide-react'
 import type { FloorPlanAnalysis } from '../../types/dashboard'
 
 const MAX_FILE_SIZE = 3.5 * 1024 * 1024
-const MAX_IMAGE_DIMENSION = 8000
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
 interface Props {
@@ -23,39 +22,6 @@ function readFile(file: Blob): Promise<string> {
     }
     reader.readAsDataURL(file)
   })
-}
-
-async function prepareBedrockImage(file: File): Promise<File> {
-  if (file.type !== 'image/webp') return file
-
-  let bitmap: ImageBitmap
-  try {
-    bitmap = await createImageBitmap(file)
-  } catch {
-    throw new Error('This WEBP image could not be decoded. Try exporting it as PNG or JPG.')
-  }
-
-  try {
-    const scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height))
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-    const context = canvas.getContext('2d')
-    if (!context) throw new Error('Could not prepare this WEBP image for analysis.')
-
-    context.fillStyle = '#fff'
-    context.fillRect(0, 0, canvas.width, canvas.height)
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-
-    for (const quality of [0.9, 0.75, 0.6]) {
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
-      if (!blob) throw new Error('Could not convert this WEBP image for analysis.')
-      if (blob.size <= MAX_FILE_SIZE) return new File([blob], file.name.replace(/\.webp$/i, '.jpg'), { type: 'image/jpeg' })
-    }
-    throw new Error('The converted image is too large. Resize it or export it as a smaller JPG.')
-  } finally {
-    bitmap.close()
-  }
 }
 
 async function readApiResponse<T>(response: Response): Promise<T> {
@@ -102,7 +68,7 @@ export function FloorPlanUploader({ onAnalyzed }: Props) {
     if (nextFile.size > MAX_FILE_SIZE) {
       setFile(null)
       clearPreview()
-      setError('The image must be 3.5 MB or smaller for Bedrock image analysis.')
+      setError('The image must be 3.5 MB or smaller for Gemini image analysis.')
       return
     }
     clearPreview()
@@ -116,20 +82,18 @@ export function FloorPlanUploader({ onAnalyzed }: Props) {
     setIsAnalyzing(true)
     setError('')
     try {
-      const bedrockFile = await prepareBedrockImage(file)
       const imageDataUrl = await readFile(file)
-      const uploadDataUrl = bedrockFile === file ? imageDataUrl : await readFile(bedrockFile)
       const response = await fetch('/api/analyze-floorplan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageBase64: uploadDataUrl.slice(uploadDataUrl.indexOf(',') + 1),
-          mimeType: bedrockFile.type,
+          imageBase64: imageDataUrl.slice(imageDataUrl.indexOf(',') + 1),
+          mimeType: file.type,
         }),
       })
       const result = await readApiResponse<{ analysis?: FloorPlanAnalysis; error?: string }>(response)
-      if (!response.ok) throw new Error(result.error || 'Amazon Bedrock could not analyze this image.')
-      if (!result.analysis?.rooms?.length) throw new Error('Bedrock returned no room data. Please try a clearer plan.')
+      if (!response.ok) throw new Error(result.error || 'Gemini could not analyze this image.')
+      if (!result.analysis?.rooms?.length) throw new Error('Gemini returned no room data. Please try a clearer plan.')
       onAnalyzed(result.analysis, imageDataUrl)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not analyze the floor plan.')
@@ -181,7 +145,7 @@ export function FloorPlanUploader({ onAnalyzed }: Props) {
                   className="rounded-md p-1 text-muted hover:bg-ivory hover:text-ink"
                 ><X size={16} /></button>
               </div>
-              <p className="mt-1 text-xs text-muted">{(file.size / 1024 / 1024).toFixed(2)} MB · Bedrock visual analysis</p>
+              <p className="mt-1 text-xs text-muted">{(file.size / 1024 / 1024).toFixed(2)} MB · Gemini visual analysis</p>
               <button
                 type="button"
                 onClick={analyze}
@@ -189,7 +153,7 @@ export function FloorPlanUploader({ onAnalyzed }: Props) {
                 className="mt-4 inline-flex items-center gap-2 rounded-lg bg-pine px-4 py-2 text-sm font-semibold text-white hover:bg-forest disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isAnalyzing ? <LoaderCircle size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                {isAnalyzing ? 'Analyzing with Bedrock…' : 'Analyze with Bedrock'}
+                {isAnalyzing ? 'Analyzing with Gemini…' : 'Analyze with Gemini'}
               </button>
             </div>
           </div>
@@ -197,7 +161,7 @@ export function FloorPlanUploader({ onAnalyzed }: Props) {
       )}
 
       {error && <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
-      <p className="mt-3 text-xs text-muted">Submitting sends the image to Amazon Bedrock. Avoid uploading plans containing sensitive personal information.</p>
+      <p className="mt-3 text-xs text-muted">Submitting sends the image to Google Gemini for analysis. Avoid uploading plans containing sensitive personal information.</p>
     </div>
   )
 }
