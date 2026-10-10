@@ -87,12 +87,21 @@ function Furniture() {
   </g>
 }
 
-interface Props { tab: TabId; highlight: string | null }
+interface Props { tab: TabId; highlight: string | null; imageUrl?: string | null }
 
-export function FloorPlanCanvas({ tab, highlight }: Props) {
+export function FloorPlanCanvas({ tab, highlight, imageUrl }: Props) {
   const hl = highlight && highlight !== 'all' ? rooms.find((r) => r.id === highlight) : null
   const tag = (x: number, y: number, t: string, c: string, w = 150) => (
     <g><rect x={x} y={y} width={w} height={17} rx={8} fill="#fff" stroke={c} /><text x={x + w / 2} y={y + 12} fontSize={10} fontWeight={600} textAnchor="middle" fill={c}>{t}</text></g>)
+
+  if (imageUrl) {
+    return (
+      <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-2 overflow-auto p-3">
+        <img src={imageUrl} alt="Uploaded floor plan analyzed by Amazon Bedrock" className="max-h-[480px] max-w-full object-contain" />
+        <p className="text-xs text-muted">Uploaded floor plan · {tab === 'original' ? 'original image' : `AI room data shown below · ${tab} view`}</p>
+      </div>
+    )
+  }
 
   return (
     <svg viewBox={`0 0 ${PLAN_VIEWBOX.w} ${PLAN_VIEWBOX.h}`} className="h-full w-full" role="img"

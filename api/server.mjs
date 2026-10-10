@@ -1,13 +1,10 @@
 import { createServer } from 'node:http'
+import { analyzeFloorPlan, generateDesignImage, publicError } from './bedrock.mjs'
 
 const PORT = Number(process.env.API_PORT || 3001)
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const MAX_REQUEST_BYTES = Math.ceil(MAX_IMAGE_BYTES * 4 / 3) + 1024
-const MIME_SIGNATURES = {
-  'image/jpeg': (buffer) => buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff,
-  'image/png': (buffer) => buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
-  'image/webp': (buffer) => buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP',
-}
+const MAX_REQUEST_BYTES = 5 * 1024 * 1024
+const MAX_BEDROCK_REQUESTS_PER_MINUTE = 12
+const bedrockRequests = new Map()
 
 function sendJson(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -19,7 +16,7 @@ async function readJson(request) {
   let size = 0
   for await (const chunk of request) {
     size += chunk.length
-    if (size > MAX_REQUEST_BYTES) throw Object.assign(new Error('Image must be 10 MB or smaller.'), { status: 413 })
+    if (size > MAX_REQUEST_BYTES) throw Object.assign(new Error('Request is too large.'), { status: 413 })
     chunks.push(chunk)
   }
   try {
@@ -29,86 +26,157 @@ async function readJson(request) {
   }
 }
 
-async function analyzeFloorPlan(request, response) {
-  if (!process.env.GEMINI_API_KEY) {
-    sendJson(response, 503, { error: 'Gemini is not configured. Set GEMINI_API_KEY in your environment and restart the app.' })
-    return
+async function getClimate(url) {
+  const latitude = Number(url.searchParams.get('latitude'))
+  const longitude = Number(url.searchParams.get('longitude'))
+  const years = Number(url.searchParams.get('years') || 1)
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    throw Object.assign(new Error('Valid latitude and longitude are required.'), { status: 400 })
+  }
+  if (!Number.isInteger(years) || years < 1 || years > 5) {
+    throw Object.assign(new Error('Historical weather range must be between 1 and 5 years.'), { status: 400 })
   }
 
+  const currentUrl = new URL('https://api.open-meteo.com/v1/forecast')
+  currentUrl.search = new URLSearchParams({
+    latitude: String(latitude),
+    longitude: String(longitude),
+    current: 'temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,wind_direction_10m,shortwave_radiation',
+    timezone: 'auto',
+  }).toString()
+
+  const archiveEnd = new Date()
+  archiveEnd.setUTCDate(archiveEnd.getUTCDate() - 6)
+  archiveEnd.setUTCDate(0)
+  const archiveStart = new Date(Date.UTC(archiveEnd.getUTCFullYear() - years, archiveEnd.getUTCMonth() + 1, 1))
+  const toDate = (date) => date.toISOString().slice(0, 10)
+  const archiveUrl = new URL('https://archive-api.open-meteo.com/v1/archive')
+  archiveUrl.search = new URLSearchParams({
+    latitude: String(latitude),
+    longitude: String(longitude),
+    start_date: toDate(archiveStart),
+    end_date: toDate(archiveEnd),
+    hourly: 'temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,shortwave_radiation',
+    timezone: 'auto',
+  }).toString()
+
+  const signal = AbortSignal.timeout(30_000)
+  const [currentResponse, archiveResponse] = await Promise.all([fetch(currentUrl, { signal }), fetch(archiveUrl, { signal })])
+  if (!currentResponse.ok || !archiveResponse.ok) {
+    throw new Error(`Open-Meteo weather service returned HTTP ${!currentResponse.ok ? currentResponse.status : archiveResponse.status}.`)
+  }
+  const [currentData, archiveData] = await Promise.all([currentResponse.json(), archiveResponse.json()])
+  const current = currentData.current
+  if (!current || !archiveData.hourly?.time?.length) throw new Error('Open-Meteo did not return weather data for this location.')
+
+  const groups = new Map()
+  const days = new Map()
+  const hourly = archiveData.hourly
+  for (let index = 0; index < hourly.time.length; index += 1) {
+    const timestamp = hourly.time[index]
+    const date = timestamp.slice(0, 10)
+    const month = new Date(`${date}T00:00:00Z`).toLocaleString('en', { month: 'short', timeZone: 'UTC' })
+    if (!groups.has(month)) groups.set(month, new Set())
+    if (!days.has(date)) {
+      const day = { date, temperature: [], maxTemp: [], minTemp: [], humidity: [], wind: [], direction: [], solar: [] }
+      days.set(date, day)
+      groups.get(month).add(day)
+    }
+    const day = days.get(date)
+    if (Number.isFinite(hourly.temperature_2m?.[index])) {
+      day.temperature.push(hourly.temperature_2m[index])
+      day.maxTemp.push(hourly.temperature_2m[index])
+      day.minTemp.push(hourly.temperature_2m[index])
+    }
+    if (Number.isFinite(hourly.relative_humidity_2m?.[index])) day.humidity.push(hourly.relative_humidity_2m[index])
+    if (Number.isFinite(hourly.wind_speed_10m?.[index])) day.wind.push(hourly.wind_speed_10m[index])
+    if (Number.isFinite(hourly.wind_direction_10m?.[index])) day.direction.push(hourly.wind_direction_10m[index])
+    if (Number.isFinite(hourly.shortwave_radiation?.[index])) day.solar.push(hourly.shortwave_radiation[index] / 1000)
+  }
+
+  const mean = (values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0
+  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+  const monthly = [...groups].map(([month, dates]) => {
+    const monthlyDays = [...dates]
+    const humidity = mean(monthlyDays.filter((day) => day.humidity.length).map((day) => mean(day.humidity)))
+    const temperature = mean(monthlyDays.filter((day) => day.maxTemp.length).map((day) => Math.max(...day.maxTemp)))
+    const meanTemperature = mean(monthlyDays.filter((day) => day.temperature.length).map((day) => mean(day.temperature)))
+    const years = new Set(monthlyDays.map((day) => day.date.slice(0, 4))).size
+    const degrees = monthlyDays.filter((day) => day.direction.length).map((day) => mean(day.direction))
+    const radians = degrees.map((degree) => degree * Math.PI / 180)
+    const windDegrees = radians.length
+      ? (Math.atan2(mean(radians.map(Math.sin)), mean(radians.map(Math.cos))) * 180 / Math.PI + 360) % 360
+      : 0
+    const direction = directions[Math.round(windDegrees / 45) % 8]
+    return {
+      month,
+      maxTemp: temperature,
+      humidity,
+      warmNights: monthlyDays.filter((day) => day.minTemp.length && Math.min(...day.minTemp) > 20).length / Math.max(years, 1),
+      wetBulb: meanTemperature * Math.atan(0.151977 * Math.sqrt(humidity + 8.313659)) + Math.atan(meanTemperature + humidity) - Math.atan(humidity - 1.676331) + 0.00391838 * humidity ** 1.5 * Math.atan(0.023101 * humidity) - 4.686035,
+      windSpeed: mean(monthlyDays.filter((day) => day.wind.length).map((day) => mean(day.wind))),
+      windDir: direction,
+      solar: mean(monthlyDays.map((day) => day.solar.reduce((sum, value) => sum + value, 0))),
+    }
+  })
+  const metric = (id, label, value, status, tone, icon) => ({ id, label, value, status, tone, icon })
+  const currentTemperature = current.temperature_2m
+  const humidity = current.relative_humidity_2m
+  const windSpeed = current.wind_speed_10m
+  const wetBulb = current.apparent_temperature
+  const metrics = [
+    metric('temperature', 'Current Temperature', `${currentTemperature}°C`, 'Model estimate', currentTemperature >= 35 ? 'high' : currentTemperature >= 28 ? 'moderate' : 'neutral', 'sun'),
+    metric('humidity', 'Relative Humidity', `${humidity}%`, 'Model estimate', humidity >= 75 ? 'high' : humidity >= 55 ? 'moderate' : 'neutral', 'droplet'),
+    metric('wind', 'Wind Speed', `${windSpeed} km/h`, `${current.wind_direction_10m}° direction`, 'neutral', 'wind'),
+    metric('feels-like', 'Feels Like', `${wetBulb}°C`, 'Apparent temperature', wetBulb >= 35 ? 'high' : wetBulb >= 28 ? 'moderate' : 'neutral', 'thermo'),
+    metric('solar', 'Solar Radiation', `${current.shortwave_radiation} W/m²`, 'Model estimate', current.shortwave_radiation >= 600 ? 'high' : 'moderate', 'sun'),
+  ]
+  return { metrics, monthly, source: 'Open-Meteo forecast and historical archive', fetchedAt: current.time }
+}
+
+async function handle(request, response) {
+  const url = new URL(request.url || '/', 'http://localhost')
   try {
-    const body = await readJson(request)
-    const { imageBase64, mimeType } = body
-    if (typeof imageBase64 !== 'string' || !imageBase64 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(imageBase64)) {
-      sendJson(response, 400, { error: 'A valid floor plan image is required.' })
+    if (request.method === 'POST' && url.pathname === '/api/analyze-floorplan') {
+      enforceBedrockRateLimit(request)
+      const body = await readJson(request)
+      sendJson(response, 200, await analyzeFloorPlan(body.imageBase64, body.mimeType))
       return
     }
-    if (!Object.hasOwn(MIME_SIGNATURES, mimeType)) {
-      sendJson(response, 400, { error: 'Only PNG, JPG, and WEBP images are supported.' })
+    if (request.method === 'POST' && url.pathname === '/api/generate-design-image') {
+      enforceBedrockRateLimit(request)
+      const body = await readJson(request)
+      const imageBase64 = await generateDesignImage(body.prompt, body.imageBase64, body.mimeType)
+      sendJson(response, 200, { imageBase64 })
       return
     }
-
-    const image = Buffer.from(imageBase64, 'base64')
-    if (image.length > MAX_IMAGE_BYTES) {
-      sendJson(response, 413, { error: 'Image must be 10 MB or smaller.' })
+    if (request.method === 'GET' && url.pathname === '/api/climate') {
+      sendJson(response, 200, await getClimate(url))
       return
     }
-    if (image.length === 0 || !MIME_SIGNATURES[mimeType](image)) {
-      sendJson(response, 400, { error: 'The selected file is not a valid image of the stated type.' })
-      return
-    }
-
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: 'Analyze this architectural floor plan. Describe the visible rooms and layout, identify visible doors, windows, and ventilation openings, and note any limitations or unclear areas. Do not invent measurements or facts that cannot be read from the image. Format the response with concise headings and bullet points.' },
-              { inline_data: { mime_type: mimeType, data: image.toString('base64') } },
-            ],
-          }],
-        }),
-      },
-    )
-
-    const result = await geminiResponse.json()
-    if (!geminiResponse.ok) {
-      const message = result?.error?.message
-      console.error(`Gemini API request failed (${geminiResponse.status}): ${message || 'unknown error'}`)
-      sendJson(response, 502, { error: message || 'Gemini could not analyze the image. Please try again.' })
-      return
-    }
-
-    const analysis = result?.candidates?.[0]?.content?.parts
-      ?.map((part) => part.text)
-      .filter((text) => typeof text === 'string')
-      .join('\n')
-      .trim()
-    if (!analysis) {
-      sendJson(response, 502, { error: 'Gemini did not return an analysis. Please try a clearer floor plan image.' })
-      return
-    }
-    sendJson(response, 200, { analysis })
+    sendJson(response, 404, { error: 'Not found.' })
   } catch (error) {
-    if (error instanceof TypeError && error.message.includes('fetch')) {
-      console.error('Could not reach the Gemini API:', error.message)
-      sendJson(response, 502, { error: 'Could not reach Gemini. Check your network connection and try again.' })
-      return
-    }
-    const status = Number.isInteger(error?.status) ? error.status : 500
-    if (status === 500) console.error('Floor plan analysis failed:', error)
-    sendJson(response, status, { error: status === 500 ? 'Floor plan analysis failed unexpectedly.' : error.message })
+    const { status, message } = publicError(error)
+    if (status >= 500) console.error('API request failed:', error)
+    sendJson(response, status, { error: message })
   }
 }
 
-createServer((request, response) => {
-  if (request.method === 'POST' && request.url === '/api/analyze-floorplan') {
-    void analyzeFloorPlan(request, response)
-    return
+function enforceBedrockRateLimit(request) {
+  const now = Date.now()
+  const key = request.socket.remoteAddress || 'unknown'
+  const recent = (bedrockRequests.get(key) || []).filter((timestamp) => now - timestamp < 60_000)
+  if (recent.length >= MAX_BEDROCK_REQUESTS_PER_MINUTE) {
+    throw Object.assign(new Error('Too many AI requests. Please wait a minute and try again.'), { status: 429 })
   }
-  sendJson(response, 404, { error: 'Not found.' })
-}).listen(PORT, '127.0.0.1', () => {
-  console.log(`Gemini API server listening on http://127.0.0.1:${PORT}`)
-})
+  recent.push(now)
+  bedrockRequests.set(key, recent)
+  if (bedrockRequests.size > 1000) {
+    for (const [address, timestamps] of bedrockRequests) {
+      if (!timestamps.some((timestamp) => now - timestamp < 60_000)) bedrockRequests.delete(address)
+    }
+  }
+}
+
+createServer((request, response) => { void handle(request, response) })
+  .listen(PORT, '127.0.0.1', () => console.log(`ClimateTwin API listening on http://127.0.0.1:${PORT}`))

@@ -74,13 +74,30 @@ export interface MonthlyClimate {
   solar: number
 }
 
+export interface LiveClimate {
+  metrics: ClimateMetric[]
+  monthly: MonthlyClimate[]
+  source: string
+  fetchedAt: string
+}
+
+export interface FloorPlanAnalysis {
+  summary: string
+  orientation: string
+  rooms: { id: string; name: string; type: string; heatRisk: HeatLevel; ventilation: string; features: string[] }[]
+  observations: Observation[]
+  recommendations: Recommendation[]
+  openings: { doors: number; windows: number; vents: number }
+  limitations: string[]
+}
+
 export interface ClimateProfile {
   id: string
   metrics: ClimateMetric[]
   monthly: MonthlyClimate[]
 }
 
-export interface LocationOption { id: string; name: string; short: string; profileId: string }
+export interface LocationOption { id: string; name: string; short: string; profileId: string; latitude: number; longitude: number }
 export interface PeriodOption { id: string; label: string; shift: number }
 
 export interface Observation {

@@ -17,14 +17,18 @@ export function ClimateMetricCard({ m }: { m: ClimateMetric }) {
   )
 }
 
-export function ClimateInsights({ metrics, onHistory }: { metrics: ClimateMetric[]; onHistory: () => void }) {
+export function ClimateInsights({ metrics, source, loading = false, error, onHistory }: { metrics: ClimateMetric[]; source: string; loading?: boolean; error?: string | null; onHistory: () => void }) {
   return (
     <section aria-labelledby="ci-h">
       <div className="mb-2.5 flex items-center justify-between gap-2">
-        <h2 id="ci-h" className="flex items-center gap-2 font-serif text-[19px] font-semibold">Climate Insights <Badge tone="neutral">Sample data</Badge></h2>
+        <h2 id="ci-h" className="flex flex-wrap items-center gap-2 font-serif text-[19px] font-semibold">Climate Insights <Badge tone={source === 'Sample data' || loading ? 'neutral' : 'green'}>{loading ? 'Loading live weather…' : source}</Badge></h2>
         <button onClick={onHistory} className="text-[12.5px] font-semibold text-leaf hover:underline">View Historical Data →</button>
       </div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{metrics.map((m) => <ClimateMetricCard key={m.id} m={m} />)}</div>
+      {error && <p role="alert" className="mb-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-800">{error}</p>}
+      {metrics.length
+        ? <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">{metrics.map((m) => <ClimateMetricCard key={m.id} m={m} />)}</div>
+        : loading && <p className="rounded-lg border border-dashed border-line p-4 text-center text-xs text-muted">Waiting for live weather observations.</p>}
+      {source.startsWith('Open-Meteo') && <a href="https://open-meteo.com/" target="_blank" rel="noreferrer" className="mt-1 block text-right text-[10px] text-muted hover:text-leaf">Weather data by Open-Meteo</a>}
     </section>
   )
 }

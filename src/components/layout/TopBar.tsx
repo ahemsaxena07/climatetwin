@@ -67,7 +67,7 @@ export function TopBar({ locationId, periodId, onLocation, onPeriod, onSave, onD
                 </button>
               </li>
             ))}
-            <li className="border-t border-line px-3 py-1.5 text-[11px] text-muted">Mock climate profiles — demo only</li>
+            <li className="border-t border-line px-3 py-1.5 text-[11px] text-muted">Climate data location</li>
           </ul>
         )}
       </div>

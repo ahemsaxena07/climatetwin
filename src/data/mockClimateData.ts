@@ -15,22 +15,22 @@ export const project = {
   name: 'My Home Project',
   shortLocation: 'Greater Noida, UP',
   defaultLocationId: 'greater-noida',
-  defaultPeriodId: '2019-2024',
+  defaultPeriodId: '1',
   scaleLabel: 'Scale: 1:100',
 }
 
 export const locations: LocationOption[] = [
-  { id: 'greater-noida', name: 'Greater Noida, Uttar Pradesh', short: 'Greater Noida, UP', profileId: 'composite' },
-  { id: 'jaipur', name: 'Jaipur, Rajasthan', short: 'Jaipur, RJ', profileId: 'hotdry' },
-  { id: 'chennai', name: 'Chennai, Tamil Nadu', short: 'Chennai, TN', profileId: 'humid' },
-  { id: 'pune', name: 'Pune, Maharashtra', short: 'Pune, MH', profileId: 'moderate' },
-  { id: 'bengaluru', name: 'Bengaluru, Karnataka', short: 'Bengaluru, KA', profileId: 'mild' },
+  { id: 'greater-noida', name: 'Greater Noida, Uttar Pradesh', short: 'Greater Noida, UP', profileId: 'composite', latitude: 28.4744, longitude: 77.504 },
+  { id: 'jaipur', name: 'Jaipur, Rajasthan', short: 'Jaipur, RJ', profileId: 'hotdry', latitude: 26.9124, longitude: 75.7873 },
+  { id: 'chennai', name: 'Chennai, Tamil Nadu', short: 'Chennai, TN', profileId: 'humid', latitude: 13.0827, longitude: 80.2707 },
+  { id: 'pune', name: 'Pune, Maharashtra', short: 'Pune, MH', profileId: 'moderate', latitude: 18.5204, longitude: 73.8567 },
+  { id: 'bengaluru', name: 'Bengaluru, Karnataka', short: 'Bengaluru, KA', profileId: 'mild', latitude: 12.9716, longitude: 77.5946 },
 ]
 
 export const periods: PeriodOption[] = [
-  { id: '2019-2024', label: '2019 - 2024', shift: 0 },
-  { id: '2020-2025', label: '2020 - 2025', shift: 0.4 },
-  { id: '2021-2025', label: '2021 - 2025', shift: 0.7 },
+  { id: '1', label: 'Past 12 months', shift: 0 },
+  { id: '3', label: 'Past 3 years', shift: 0 },
+  { id: '5', label: 'Past 5 years', shift: 0 },
 ]
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -285,13 +285,13 @@ export const workflowSteps = [
 export const sectionInfo: Partial<Record<SectionId, { title: string; description: string; stats: { label: string; value: string }[] }>> = {
   upload: {
     title: 'Upload Floor Plan',
-    description: 'Upload a floor plan image (PNG, JPG or WEBP) and send it to Gemini for analysis.',
+    description: 'Upload a floor plan image for Bedrock analysis, then explore room findings, live local climate, and generated design concepts.',
     stats: [],
   },
   materials: {
     title: 'Materials & Products',
-    description: 'Compare wall, roof and glazing options. Entries here are generic placeholders with no brand claims.',
-    stats: [{ label: 'Roof finish', value: 'Reflective coating (placeholder)' }, { label: 'Glazing', value: 'Shaded double-glazed (placeholder)' }, { label: 'Wall', value: 'Insulated west wall (placeholder)' }],
+    description: 'Review Bedrock-generated material and shading recommendations. Verify all products and specifications with a qualified professional.',
+    stats: [{ label: 'Roof finish', value: 'Review AI recommendations' }, { label: 'Glazing', value: 'Verify against site conditions' }, { label: 'Wall', value: 'Confirm existing construction' }],
   },
   cost: {
     title: 'Cost Estimate',
@@ -310,7 +310,7 @@ export const sectionInfo: Partial<Record<SectionId, { title: string; description
   },
   settings: {
     title: 'Settings',
-    description: 'Demo preferences. Floor plan images are sent to Gemini for analysis; no account is required.',
-    stats: [{ label: 'Units', value: 'Metric (°C, km/h)' }, { label: 'Data source', value: 'Local sample data' }, { label: 'Analysis', value: 'Gemini API' }],
+    description: 'Configure the demo environment. Floor plan analysis and design concepts use Amazon Bedrock; weather uses Open-Meteo.',
+    stats: [{ label: 'Units', value: 'Metric (°C, km/h)' }, { label: 'Weather source', value: 'Open-Meteo public API' }, { label: 'AI analysis', value: 'Amazon Bedrock' }],
   },
 }

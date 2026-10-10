@@ -21,14 +21,14 @@ export function ObservationRow({ o, active, onClick }: { o: Observation; active:
   )
 }
 
-export function KeyObservations({ items, activeId, onSelect, onDetails }: { items: Observation[]; activeId: number | null; onSelect: (o: Observation) => void; onDetails: () => void }) {
+export function KeyObservations({ items, activeId, onSelect, onDetails, source = 'Sample analysis' }: { items: Observation[]; activeId: number | null; onSelect: (o: Observation) => void; onDetails: () => void; source?: string }) {
   return (
     <section aria-labelledby="ko-h" className="border-t border-line pt-3">
       <div className="mb-1.5 flex items-center justify-between">
-        <h2 id="ko-h" className="flex items-center gap-1.5 font-serif text-[17px] font-semibold">Key Observations (AI Analysis) <span title="Illustrative observations, not real AI model output"><Info size={15} className="text-muted" aria-label="Illustrative observations, not real AI model output" /></span></h2>
+        <h2 id="ko-h" className="flex items-center gap-1.5 font-serif text-[17px] font-semibold">Key Observations <span title={source}><Info size={15} className="text-muted" aria-label={source} /></span></h2>
         <button onClick={onDetails} className="text-[12.5px] font-semibold text-leaf hover:underline">View Details →</button>
       </div>
-      <ul className="flex flex-col">{items.map((o) => <ObservationRow key={o.id} o={o} active={activeId === o.id} onClick={() => onSelect(o)} />)}</ul>
+      {items.length ? <ul className="flex flex-col">{items.map((o) => <ObservationRow key={o.id} o={o} active={activeId === o.id} onClick={() => onSelect(o)} />)}</ul> : <p className="py-2 text-xs text-muted">No observations were returned for this floor plan.</p>}
     </section>
   )
 }

@@ -12,11 +12,12 @@ const charts: { key: Key; title: string; unit: string; color: string; bar?: bool
   { key: 'solar', title: 'Solar exposure', unit: 'kWh/m²/day', color: '#E0A100', bar: true },
 ]
 
-export function HistoricalClimatePanel({ data, locationName, period }: { data: MonthlyClimate[]; locationName: string; period: string }) {
+export function HistoricalClimatePanel({ data, locationName, period, source }: { data: MonthlyClimate[]; locationName: string; period: string; source: string }) {
   return (
     <div>
       <p className="mb-3 flex flex-wrap items-center gap-2 text-sm text-muted">
-        {locationName} · {period} <Badge tone="neutral">Sample data — not observed measurements</Badge>
+        {locationName} · {period} <Badge tone={source.includes('Sample data') ? 'neutral' : 'green'}>{source}</Badge>
+        {source.startsWith('Open-Meteo') && <a href="https://open-meteo.com/" target="_blank" rel="noreferrer" className="text-xs text-leaf hover:underline">Weather data by Open-Meteo</a>}
       </p>
       <div className="grid gap-3 md:grid-cols-2">
         {charts.map((c) => (

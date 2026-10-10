@@ -23,14 +23,14 @@ export function RecommendationCard({ r, active, onClick }: { r: Recommendation; 
   )
 }
 
-export function RecommendedActions({ items, activeId, onSelect, onViewAll }: { items: Recommendation[]; activeId: string | null; onSelect: (r: Recommendation) => void; onViewAll: () => void }) {
+export function RecommendedActions({ items, activeId, onSelect, onViewAll, source = 'Sample recommendations' }: { items: Recommendation[]; activeId: string | null; onSelect: (r: Recommendation) => void; onViewAll: () => void; source?: string }) {
   return (
     <section aria-labelledby="ra-h" className="border-t border-line pt-3">
       <div className="mb-2 flex items-center justify-between">
-        <h2 id="ra-h" className="font-serif text-[17px] font-semibold">Recommended Actions</h2>
+        <h2 id="ra-h" className="flex items-center gap-2 font-serif text-[17px] font-semibold">Recommended Actions <span className="rounded-full bg-limepale px-2 py-0.5 text-[10px] font-semibold text-leaf">{source}</span></h2>
         <button onClick={onViewAll} className="text-[12.5px] font-semibold text-leaf hover:underline">View All →</button>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2">{items.map((r) => <RecommendationCard key={r.id} r={r} active={activeId === r.id} onClick={() => onSelect(r)} />)}</div>
+      {items.length ? <div className="grid gap-2 sm:grid-cols-2">{items.map((r) => <RecommendationCard key={r.id} r={r} active={activeId === r.id} onClick={() => onSelect(r)} />)}</div> : <p className="py-2 text-xs text-muted">No recommendations were returned for this floor plan.</p>}
     </section>
   )
 }

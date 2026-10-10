@@ -31,8 +31,10 @@ If you are developing a production application, we recommend enabling type-aware
 
 See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
 
-## Gemini floor plan analysis
+## Amazon Bedrock floor plan analysis
 
-Create a `.env` file from `.env.example` and set `GEMINI_API_KEY` to a Google AI Studio API key. Start the app with `npm run dev`; this starts the Vite frontend and the local API server. In the Upload Floor Plan section, select a PNG, JPG, or WEBP image up to 10 MB and choose **Analyze with Gemini**. The Gemini key is read only by the API server and is never sent to the browser.
+Copy `.env.example` to `.env`, set `AWS_BEARER_TOKEN_BEDROCK` to your Amazon Bedrock API key, and choose an AWS region where the configured text and image models are enabled. The default text model is the global Claude Sonnet 4.6 inference profile, which supports requests from `ap-south-1`; global inference can process data outside the source Region. `AWS_REGION`, `BEDROCK_MODEL_ID`, and `BEDROCK_IMAGE_MODEL_ID` can be changed to match your AWS setup. Start the frontend and API server with `npm run dev`.
 
-Uploaded floor plan images are sent to Google's Gemini API for analysis. Do not upload images containing sensitive personal information. For deployment, run the Node API server with `GEMINI_API_KEY` set and route `/api/analyze-floorplan` from the frontend origin to that server.
+In Upload Floor Plan, submit a PNG, JPG, or WEBP image up to 3.5 MB. Bedrock analyzes the plan and returns identified rooms, visible openings, qualitative observations, limitations, and recommendations for the Overview. The selected city then loads current and historical weather from the public Open-Meteo API. The **Generate image** button uses Amazon Titan Image Generator, conditioned on the uploaded floor-plan layout, to create an illustrative climate-design concept; it is not dimensionally accurate or a construction drawing.
+
+The bearer token is used only by the server-side AWS SDK and is never sent to the browser. Uploaded floor plans are sent to Amazon Bedrock; do not upload plans containing sensitive personal information. Climate values come from public weather models and do not describe indoor conditions. Thermal and ventilation findings are AI-generated qualitative hypotheses, not measured results. For deployment, run the Node API server with the `.env` values set and route `/api/analyze-floorplan`, `/api/generate-design-image`, and `/api/climate` from the frontend origin to that server.
